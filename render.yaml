@@ -1,0 +1,22 @@
+# Render Blueprint (free web service). Secrets like WEBHOOK_TOKEN are set
+# in the dashboard or via MCP after creation — do not commit their values.
+services:
+  - type: web
+    name: jc-digital-whatsapp-bot
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash start.sh
+    healthCheckPath: /health
+    envVars:
+      - key: DRY_RUN
+        value: "true"
+      - key: GUPSHUP_API_KEY
+        value: ""
+      - key: GUPSHUP_APP_NAME
+        value: JuanCamiloTestBot
+      - key: GUPSHUP_SOURCE
+        value: "34637274292"
+      - key: WEBHOOK_TOKEN
+        sync: false
