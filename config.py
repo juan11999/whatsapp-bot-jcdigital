@@ -40,16 +40,27 @@ GUPSHUP_APP_ID = _env("GUPSHUP_APP_ID", "009b780e-e61b-4396-9cb2-d3faf84297eb")
 GUPSHUP_SOURCE = _env("GUPSHUP_SOURCE", "34637274292").lstrip("+")
 WABA_ID = _env("WABA_ID", "3666860806796820")
 PHONE_NUMBER_ID = _env("PHONE_NUMBER_ID", "1378713898668233")
-WEBHOOK_VERIFY_TOKEN = _env("WEBHOOK_VERIFY_TOKEN", "jc-digital-geneve")
-# Optional shared secret for POST /webhook?token=... (empty = no check).
+# Messaging provider: "meta" (Cloud API, default) or "gupshup".
+PROVIDER = (_env("PROVIDER", "meta") or "meta").strip().lower()
+META_VERIFY_TOKEN = _env("META_VERIFY_TOKEN")
+META_APP_SECRET = _env("META_APP_SECRET")
+META_ACCESS_TOKEN = _env("META_ACCESS_TOKEN")
+META_PHONE_NUMBER_ID = _env("META_PHONE_NUMBER_ID") or _env("PHONE_NUMBER_ID")
+META_GRAPH_VERSION = _env("META_GRAPH_VERSION", "v21.0") or "v21.0"
+# Optional Gupshup-only shared secret for POST /webhook?token=... (empty = no check).
 WEBHOOK_TOKEN = _env("WEBHOOK_TOKEN")
 BUSINESS_NAME = "JC Digital Geneve"
 
 HOST = _env("HOST", "0.0.0.0")
 PORT = int(_env("PORT", "8080"))
 
-# DRY_RUN defaults to true until a key is present and someone turns it off.
-DRY_RUN = _bool("DRY_RUN", default=True) or not bool(GUPSHUP_API_KEY)
+def _has_send_credentials() -> bool:
+    if PROVIDER == "gupshup":
+        return bool(GUPSHUP_API_KEY)
+    return bool(META_ACCESS_TOKEN and META_PHONE_NUMBER_ID)
+
+# DRY_RUN defaults to true until send credentials exist and it is turned off.
+DRY_RUN = _bool("DRY_RUN", default=True) or not _has_send_credentials()
 
 LLM_PROVIDER = _env("LLM_PROVIDER").lower()
 LLM_API_KEY = _env("LLM_API_KEY")

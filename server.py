@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
@@ -26,12 +27,14 @@ from config import (  # noqa: E402
     GUPSHUP_APP_NAME,
     GUPSHUP_SOURCE,
     HOST,
+    META_APP_SECRET,
+    META_VERIFY_TOKEN,
     PORT,
+    PROVIDER,
     WEBHOOK_LOG,
     WEBHOOK_TOKEN,
-    WEBHOOK_VERIFY_TOKEN,
 )
-from gupshup_client import send_text  # noqa: E402
+from sender import send_text  # noqa: E402
 from memory import (  # noqa: E402
     already_processed,
     append_message,
@@ -55,7 +58,8 @@ def _startup() -> None:
     init_db()
     status = llm_status()
     log.info(
-        "Bot ready | app=%s source=%s dry_run=%s llm=%s",
+        "Bot ready | provider=%s app=%s source=%s dry_run=%s llm=%s",
+        PROVIDER,
         GUPSHUP_APP_NAME,
         GUPSHUP_SOURCE,
         DRY_RUN,
@@ -204,17 +208,35 @@ async def _parse_body(request: Request) -> Any:
 
 
 def _webhook_token_ok(request: Request) -> bool:
-    """If WEBHOOK_TOKEN is set, require a matching ?token= query param."""
+    """Gupshup-only: if WEBHOOK_TOKEN is set, require a matching ?token= query param."""
     expected = WEBHOOK_TOKEN
     if not expected:
         return True
     provided = request.query_params.get("token") or ""
     return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
 
+
+def meta_signature_ok(raw_body: bytes, header: str, app_secret: str) -> bool:
+    """Validate Meta X-Hub-Signature-256 (sha256=<hex>) against the raw body."""
+    if not app_secret:
+        return True
+    if not header:
+        return False
+    provided = header[7:] if header.lower().startswith("sha256=") else header
+    expected = hmac.new(app_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
+def meta_verify_ok(mode: str, token: str, challenge: str | None, expected: str) -> bool:
+    if mode != "subscribe" or challenge is None or not expected:
+        return False
+    return hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8"))
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
+        "provider": PROVIDER,
         "app": GUPSHUP_APP_NAME,
         "business": BUSINESS_NAME,
         "source": GUPSHUP_SOURCE,
@@ -225,34 +247,47 @@ async def health() -> dict[str, Any]:
 
 @app.get("/webhook")
 async def webhook_verify(request: Request) -> Response:
-    """Meta-style verification (hub.mode / hub.challenge / hub.verify_token)."""
+    """Meta Cloud API verification handshake."""
     params = request.query_params
-    mode = params.get("hub.mode") or params.get("mode")
-    token = params.get("hub.verify_token") or params.get("verify_token")
-    challenge = params.get("hub.challenge") or params.get("challenge")
-    if mode == "subscribe" and token == WEBHOOK_VERIFY_TOKEN and challenge is not None:
-        return PlainTextResponse(challenge)
-    # Friendly GET so a pasted callback URL is not a 405
-    return JSONResponse(
-        {
-            "ok": True,
-            "service": f"{BUSINESS_NAME} WhatsApp webhook",
-            "hint": "POST inbound events here. For Meta verification, send hub.mode=subscribe.",
-        }
-    )
+    mode = params.get("hub.mode") or ""
+    token = params.get("hub.verify_token") or ""
+    challenge = params.get("hub.challenge")
+    if meta_verify_ok(mode, token, challenge, META_VERIFY_TOKEN):
+        return PlainTextResponse(str(challenge), status_code=200)
+    return PlainTextResponse("forbidden", status_code=403)
 
 
 @app.post("/")
 @app.post("/webhook")
 async def webhook(request: Request, background: BackgroundTasks) -> JSONResponse:
-    """Accept Gupshup v2 and Meta v3 payloads. Always return 200 quickly."""
-    if not _webhook_token_ok(request):
-        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    """Accept Meta Cloud API and Gupshup payloads. Always return 200 quickly after auth."""
     t0 = time.time()
+    raw = b""
     try:
-        body = await _parse_body(request)
+        raw = await request.body()
     except Exception:
         log.exception("Failed to read webhook body")
+        raw = b""
+
+    if PROVIDER == "gupshup":
+        if not _webhook_token_ok(request):
+            return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    elif META_APP_SECRET:
+        sig = request.headers.get("x-hub-signature-256") or request.headers.get("X-Hub-Signature-256") or ""
+        if not meta_signature_ok(raw, sig, META_APP_SECRET):
+            return JSONResponse({"ok": False, "error": "invalid signature"}, status_code=401)
+
+    try:
+        if raw:
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                # Fall back to form parsing for Gupshup-style bodies.
+                body = await _parse_body(request) if PROVIDER == "gupshup" else {"_raw": raw.decode("utf-8", errors="replace")}
+        else:
+            body = await _parse_body(request) if PROVIDER == "gupshup" else {}
+    except Exception:
+        log.exception("Failed to parse webhook body")
         body = {}
 
     try:

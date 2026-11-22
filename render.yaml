@@ -10,6 +10,8 @@ services:
     startCommand: bash start.sh
     healthCheckPath: /health
     envVars:
+      - key: PROVIDER
+        value: meta
       - key: DRY_RUN
         value: "true"
       - key: GUPSHUP_API_KEY
@@ -18,5 +20,11 @@ services:
         value: JuanCamiloTestBot
       - key: GUPSHUP_SOURCE
         value: "34637274292"
-      - key: WEBHOOK_TOKEN
+      - key: META_ACCESS_TOKEN
+        sync: false
+      - key: META_PHONE_NUMBER_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_VERIFY_TOKEN
         sync: false

@@ -66,3 +66,14 @@ Usa `?sync=1` para que el JSON de respuesta incluya el texto que habría enviado
 
 Documentación actual (session text): `POST https://api.gupshup.io/wa/api/v1/msg`  
 Cabecera `apikey`, cuerpo `application/x-www-form-urlencoded`: `channel=whatsapp`, `source=34637274292`, `destination`, `src.name=JuanCamiloTestBot`, `message={"type":"text","text":"..."}`.
+
+
+## Meta Cloud API (default)
+
+Set `PROVIDER=meta`. The public callback is `https://<host>/webhook`.
+
+- `GET /webhook` implements Meta's subscription handshake (`hub.mode=subscribe`, `hub.verify_token` must match `META_VERIFY_TOKEN`, responds with `hub.challenge`).
+- `POST /webhook` checks `X-Hub-Signature-256` when `META_APP_SECRET` is set, then replies through the Graph API (`META_PHONE_NUMBER_ID` + `META_ACCESS_TOKEN`) unless `DRY_RUN=true`.
+- Gupshup remains available with `PROVIDER=gupshup`.
+
+Never commit secrets. Put tokens only in the host environment.

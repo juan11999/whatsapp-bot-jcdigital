@@ -18,3 +18,4 @@ bin/
 
 .github_token
 .git-askpass.sh
+META_VERIFY_TOKEN.txt
